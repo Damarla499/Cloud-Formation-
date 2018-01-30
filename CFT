@@ -1,0 +1,150 @@
+Description: Create a variable number of EC2 instance resources.
+Parameters:
+  InstanceCount:
+    Description: Number of EC2 instances (must be between 1 and 2).
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 2
+    ConstraintDescription: Must be a number between 1 and 2.
+  ASGName:
+    Description: Name for AutoScalingGroup
+    Type: String
+    Default: Auto
+  ImageId:
+    Description: Image ID to launch EC2 instances.
+    Type: AWS::EC2::Image::Id
+    Default: ami-55ef662f
+  InstanceType:
+    Description: Instance type to launch EC2 instances.
+    Type: String
+    Default: t2.micro
+    AllowedValues: [ t2.micro, t2.small, t2.medium ]
+Conditions:
+  Launch1: !Equals [1, 1]
+  Launch2: !Equals [2, 2]
+Resources:
+  Instance1:
+    Condition: Launch1
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+  Instance2:
+    Condition: Launch2
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+  # Elastic Load Balancer for Ec2
+  MyLoadBalancer2:
+        Type: "AWS::ElasticLoadBalancing::LoadBalancer"
+        Properties:
+            AvailabilityZones:
+                - "us-east-1d"
+            Instances:
+            - Ref: Instance2
+            SecurityGroups: 
+                - sg-6ba2191e
+            Listeners:
+                - LoadBalancerPort: '80'
+                  InstancePort: '80'
+                  Protocol: HTTP
+            HealthCheck:
+                Target: HTTP:80/
+                HealthyThreshold: '1'
+                UnhealthyThreshold: '3'
+                Interval: '50'
+                Timeout: '3'    
+  # LaunchConfiguration for Instance
+  LaunchConfig:
+        Type: "AWS::AutoScaling::LaunchConfiguration"
+        Properties:
+            AssociatePublicIpAddress: true
+            InstanceId: !Ref Instance2
+            KeyName: "snehaamikey"
+            InstanceType: "t2.micro"
+            SecurityGroups: 
+              - sg-6ba2191e
+            BlockDeviceMappings: 
+                - DeviceName: "/dev/sdm"
+                  Ebs: 
+                    VolumeSize: "10"
+                    VolumeType: "gp2"
+                    DeleteOnTermination: "false"
+    
+  # AutoScaling Group 
+  MyAutoScalingGroup2:
+        Type: "AWS::AutoScaling::AutoScalingGroup"
+        Properties:
+            AvailabilityZones:
+              - "us-east-1d"
+            VPCZoneIdentifier:
+               - subnet-373bfc18
+            HealthCheckType: ELB
+            HealthCheckGracePeriod: '50'
+            LaunchConfigurationName: 
+                Ref: LaunchConfig
+            MinSize: '1'
+            MaxSize: '2'
+            DesiredCapacity: '2'
+            LoadBalancerNames: 
+              - Ref: MyLoadBalancer2
+            Tags:
+              - Key: Name
+                Value: !Ref ASGName
+                PropagateAtLaunch: true
+  # AutoScaling Policy
+  MyScaleUPPolicy2:
+        Type: AWS::AutoScaling::ScalingPolicy
+        Properties:
+            AdjustmentType: "ChangeInCapacity"
+            PolicyType: "SimpleScaling"
+            Cooldown: '70'
+            AutoScalingGroupName: 
+                Ref: "MyAutoScalingGroup2"
+            ScalingAdjustment: '1'
+  MyScaleDownPolicy2:
+        Type: AWS::AutoScaling::ScalingPolicy
+        Properties:
+            AdjustmentType: "ChangeInCapacity"
+            PolicyType: "SimpleScaling"
+            Cooldown: '70'
+            AutoScalingGroupName: 
+                Ref: "MyAutoScalingGroup2"
+            ScalingAdjustment: '-1'
+  # CloudWatch Alarm
+  CPUAlarmHigh2:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            EvaluationPeriods: '1'
+            Statistic: Average
+            Threshold: '50'
+            AlarmDescription: Alarm if CPU too high or metric disappears indicating instance is down
+            Period: '60'
+            AlarmActions:
+               - Ref: MyScaleUPPolicy2
+            Namespace: AWS/EC2
+            Dimensions:
+              - Name: AutoScalingGroupName
+                Value:
+                    Ref: MyAutoScalingGroup2
+            ComparisonOperator: GreaterThanOrEqualToThreshold
+            MetricName: CPUUtilization
+  CPUAlarmLow2:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            EvaluationPeriods: '1'
+            Statistic: Average
+            Threshold: '10'
+            AlarmDescription: Alarm if CPU Utilization is too low or metric disappears indicating instance is down
+            Period: '60'
+            AlarmActions:
+               - Ref: MyScaleUPPolicy2
+            Namespace: AWS/EC2
+            Dimensions:
+              - Name: AutoScalingGroupName
+                Value:
+                    Ref: MyAutoScalingGroup2
+            ComparisonOperator: LessThanOrEqualToThreshold
+            MetricName: CPUUtilization 
